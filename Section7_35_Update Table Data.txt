@@ -1,0 +1,39 @@
+
+/*
+if you can't connect to pdb please check open_mode of pdb by running this on cdb:
+select name,open_mode from v$containers;
+
+if open_mode of ORCLPDB is not READ_WRITE then run this command on cdb:
+alter pluggable database orclpdb open;
+
+*/
+
+--connect to database with hosapp
+
+select * from doctors where doctorid = 5;
+
+update doctors set position='Staff Internist' where doctorid = 5;
+
+select * from doctors where doctorid = 5;
+
+
+update doctors set position='Attending Physician' where position is null;
+
+commit;
+
+select * from doctors where department = 2;
+
+update doctors set name = 'George Smith' where department = 2;
+
+savepoint doctor;
+
+select * from ýnspectýons;
+
+update inspections set doctorid=3;
+
+rollback to savepoint doctor;
+
+rollback;
+
+
+

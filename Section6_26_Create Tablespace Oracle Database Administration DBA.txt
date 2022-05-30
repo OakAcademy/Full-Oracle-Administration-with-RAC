@@ -1,0 +1,18 @@
+--prerequests 
+
+/*
+connect database with sys user as sysdba 
+password of sys user is the password we have written on installation 
+*/
+
+--create tablespace 
+
+CREATE TABLESPACE tbs_data 
+	DATAFILE 'C:\APP\ORA_C\VIRTUAL\ORADATA\ORCL\ORCLPDB\tbs_data_01.dbf' SIZE 100M 
+	AUTOEXTEND ON NEXT 10M MAXSIZE 1024M;
+	
+CREATE TABLESPACE tbs_index
+	DATAFILE 'C:\APP\ORA_C\VIRTUAL\ORADATA\ORCL\ORCLPDB\tbs_index_01.dbf' SIZE 100M 
+	AUTOEXTEND ON NEXT 10M MAXSIZE 1024M;
+	
+	

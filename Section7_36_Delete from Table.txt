@@ -1,0 +1,39 @@
+
+/*
+if you can't connect to pdb please check open_mode of pdb by running this on cdb:
+select name,open_mode from v$containers;
+
+if open_mode of ORCLPDB is not READ_WRITE then run this command on cdb:
+alter pluggable database orclpdb open;
+
+
+*/
+
+--connect database with hosapp
+
+
+delete from inspectiondetail where inspectiondetailid = 1003;
+
+delete from inspections where patientid = 3;
+
+delete patient where patientid = 3;
+
+
+
+delete from doctors where doctorid = 1;
+
+delete from inspections where doctorid=1;
+
+select inspectionid from inspections where doctorýd = 1;
+
+delete from ýnspectýondetaýl where inspectionid in (106,101);
+
+
+select * from inspectiondetail;
+
+delete from inspectiondetail;
+
+rollback;
+
+truncate table inspectiondetail;
+

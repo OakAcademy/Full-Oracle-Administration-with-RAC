@@ -1,0 +1,6 @@
+--1.
+select name,open_mode from v$containers;
+
+--2.
+alter pluggable database orclpdb open;
+

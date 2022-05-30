@@ -1,0 +1,232 @@
+
+--on both databases
+SQL> select db_unique_name, database_role from v$database;
+
+--shutdown primary database
+SQL> shutdown immediate;
+
+--If the primary database can be mounted, then flush any unsent archived and current redo
+SQL> startup mount;
+
+SQL> alter system flush redo to orclstb;
+
+SQL> shutdown abort;
+
+-----------------------------------------------
+NOTE: If you have access to the archived redo log files on the primary database then determine if any archived redo log files 
+are missing on the logical standby database. Copy missing log files from the primary database to the logical standby  database.
+
+--Register the copied log files. 
+SQL> ALTER DATABASE REGISTER LOGICAL LOGFILE '/disk1/oracle/dbs/log-%r_%s_%t.arc';
+
+-----------------------------------------------
+
+--Convert logical standby database to primary
+SQL> alter database activate logical standby database finish apply;
+
+SQL> select db_unique_name, database_role from v$database;
+
+
+--Converting a Failed Primary Into a Standby Database Using Flashback Database
+
+--Determine the flashback SCN and the recovery SCN
+SQL> select merge_change# AS FLASHBACK_SCN, processed_change# AS RECOVERY_SCN 
+ from DBA_LOGSTDBY_HISTORY 
+ where stream_sequence# = (select MAX(stream_sequence#)-1 
+ from DBA_LOGSTDBY_HISTORY);
+
+--Flash back the failed primary database to the flashback SCN
+SQL> startup mount;
+
+SQL> flashback database to scn 2483485;
+
+--Convert the failed primary into a physical standby, and remount the standby database in preparation for recovery
+SQL> alter database convert to physical standby;
+
+--Configure the FAL_SERVER parameter to enable automatic recovery of log files. 
+--on physical standby (failed primary):
+SQL> alter system set fal_server='standby';
+
+--Remove any archive logs created at the time of or, after the failover operation, from the failed primary database
+$ rman target /
+
+RMAN> delete force archivelog from scn 2483487;
+
+--Recover until the recovery SCN
+SQL> alter database recover managed standby database until change 2483487 disconnect from session;
+
+--Enable the database guard:
+SQL> alter database guard all;
+
+--Activate the physical standby to become a primary database:
+SQL> alter database recover managed standby database cancel;
+
+SQL> alter database activate standby database;
+
+--Open the database
+SQL> alter database open;
+
+--Create a database link to the new primary
+SQL> create public database link dblink connect to system identified by oracle using 'standby';
+
+SQL> select db_link from dba_db_links;
+
+--start SQL apply
+SQL> alter database start logical standby apply new primary DBLINK.LOCALDOMAIN;
+
+SQL> select db_unique_name, database_role from v$database;
+
+
+--to enable replication on new primary
+SQL> alter system set log_archive_dest_2='service="primary", db_unique_name="orclprm", valid_for=(ONLINE_LOGFILES,PRIMARY_ROLE)' scope=both;
+
+SQL> alter system set log_archive_dest_state_2=ENABLE scope=both;
+
+---------------------------------------------
+--Configuring Logical Standby Databases After a Failover
+If you have any logical standby databases except you use for failover, then you must configure it after failover operation.
+
+--Ensure the new primary database is ready to support logical standby databases
+SQL> SELECT PENDING_ROLE_CHANGE_TASKS FROM V$DATABASE;
+
+--configure the FAL_SERVER parameter to enable automatic recover of log files
+SQL> ALTER SYSTEM SET FAL_SERVER='<tns_name_to_new_primary>';
+
+--verify the logical standby database is capable of being a standby to the new primary
+SQL> EXECUTE DBMS_LOGSTDBY.PREPARE_FOR_NEW_PRIMARY( former_standby_type => 'LOGICAL' dblink => 'nyc_link');
+
+--On logical standby database start SQL Apply
+SQL> ALTER DATABASE START LOGICAL STANDBY APPLY NEW PRIMARY nyc_link;
+
+--This statement must always be issued without the real-time apply option enabled. To enable real-time apply on the logical 
+--standby database, wait for the above statement to complete successfully, and then issue the following statements:
+SQL> ALTER DATABASE STOP LOGICAL STANDBY APPLY;
+SQL> ALTER DATABASE START LOGICAL STANDBY APPLY IMMEDIATE;
+
+---------------------------------------------
+
+
+--Turn databases to original roles back
+
+--By applying switchover
+
+--Prepare the new primary database for logical standby database
+SQL> alter database prepare to switchover to logical standby;
+
+--Prepare the new logical standby database for primary database
+SQL> alter database prepare to switchover to primary; 
+
+--Complete the role transition of the primary database to a logical standby database
+SQL> alter database commit to switchover to logical standby; 
+
+--On the logical standby database that you want to switch to the primary role
+SQL> alter database commit to switchover to primary;
+
+--On the new logical standby database, start SQL apply:
+SQL> alter database start logical standby apply immediate;
+
+
+--By applying failover
+
+--Shutdown new primary database
+SQL> shutdown immediate;
+
+--Flush any unsent archived and current redo
+SQL> startup mount;
+
+SQL> alter system flush redo to orclprm;
+
+SQL> shutdown abort;
+
+
+--Convert new logical standby database to primary again
+SQL> alter database activate logical standby database finish apply;
+
+SQL> select db_unique_name, database_role from v$database;
+
+
+--Converting a Failed New Primary Into a Standby Database Using Flashback Database
+
+--Determine the flashback SCN and the recovery SCN
+SQL> select merge_change# AS FLASHBACK_SCN, processed_change# AS RECOVERY_SCN 
+ from DBA_LOGSTDBY_HISTORY 
+ where stream_sequence# = (select MAX(stream_sequence#)-1 
+ from DBA_LOGSTDBY_HISTORY);
+
+--Flash back the failed primary database to the flashback SCN
+SQL> startup mount;
+
+SQL> flashback database to scn FLASHBACK_SCN;
+
+--Convert the failed primary into a physical standby
+SQL> alter database convert to physical standby;
+
+--Configure the FAL_SERVER parameter to enable automatic recovery of log files. 
+--on physical standby (failed primary):
+SQL> alter system set fal_server='primary';
+
+--Remove any archive logs created at the time of or, after the failover operation, from the failed primary database
+$ rman target /
+
+RMAN> delete force archivelog from scn RECOVERY_SCN;
+
+--Recover until the recovery SCN
+SQL> alter database recover managed standby database until change RECOVERY_SCN disconnect from session;
+
+--Enable the database guard:
+SQL> alter database guard all;
+
+--Activate the physical standby
+SQL> alter database recover managed standby database cancel;
+
+SQL> alter database activate standby database;
+
+--Open the database
+SQL> alter database open;
+
+--Create a database link
+SQL> create public database link dblink connect to system identified by oracle using 'primary';
+
+SQL> select db_link from dba_db_links;
+
+--start SQL apply
+SQL> alter database start logical standby apply new primary DBLINK.LOCALDOMAIN;
+
+SQL> select db_unique_name, database_role from v$database;
+
+
+--to enable replication on primary
+SQL> alter system set log_archive_dest_2='service="standby", db_unique_name="orclstb", valid_for=(ONLINE_LOGFILES,PRIMARY_ROLE)' scope=both;
+
+SQL> alter system set log_archive_dest_state_2=ENABLE scope=both;
+
+
+--Failover via Data Guard Broker
+
+--shutdown primary database
+SQL> shutdown abort;
+
+--connect to data guard broker
+$ dgmgrl / 
+
+DGMGRL> show configuration
+
+DGMGRL> failover to orclstb
+
+DGMGRL> reinstate database orclprm
+
+--on primary server
+SQL> startup mount;
+
+SQL> select db_unique_name,database_role,flashback_on from v$database;
+
+--on standby server
+DGMGRL> reinstate database orclprm
+
+DGMGRL> show configuration
+
+DGMGRL> switchover to orclprm
+
+DGMGRL> show configuration
+
+

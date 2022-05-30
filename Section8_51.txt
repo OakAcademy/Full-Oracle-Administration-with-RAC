@@ -1,0 +1,40 @@
+--answer 1 
+-- list doctors sorting by manager doctor id descending null values last and name ascending.
+
+select * from doctors order by managerdoctorid desc nulls last, name;
+
+--answer 2 
+-- there is campus «Site A» in departments table, please retrieve patients information that inspected in «Site A».
+
+select p.* from patients p 
+			inner join inspections i ON (p.patientid = i.patientid )
+			inner join doctors d ON (i.doctorid = d.doctorid )
+			inner join departments dep ON (d.departmentid = dep.departmentid )
+where dep.campus = 'Site A';
+
+
+--answer 3
+-- list departmentnames having inspection count greate then 3
+
+select dep.departmentname, count(i.inspectionid) inspectioncount from   inspections i 
+			inner join doctors d ON (i.doctorid = d.doctorid )
+			inner join departments dep ON (d.departmentid = dep.departmentid )
+group by dep.departmentname
+having count(i.inspectionid) > 3
+
+--answer 4
+-- what will be if we run this query (select * from doctors d inner join inspections i on (d.doctorid = d.doctorid)) ? 
+-- What is wrong with it ? 
+
+There is cartesian join in this query, because we dont do join correctly, it should be like (select * from doctors d inner join inspections i on (d.doctorid = I.doctorid))
+
+-- answer 5 update 
+--There is "Surgery" department in departments table, please update phone numbers of patients to null that inspected in "Surgery" department
+--using EXISTS clause.
+
+update patients p set phone = null 
+where exists(select 1 from  inspections i  inner join doctors d ON (i.doctorid = d.doctorid )
+                                    inner join departments dep ON (d.departmentid = dep.departmentid )
+                                where dep.departmentname = 'Surgery' 
+                                    and p.patientid = i.patientid );
+ 

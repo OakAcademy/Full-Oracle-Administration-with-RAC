@@ -1,0 +1,24 @@
+
+CREATE USER hosapp 
+IDENTIFIED BY hospass_123 
+DEFAULT TABLESPACE tbs_data
+TEMPORARY TABLESPACE temp;
+
+--privileges
+grant connect, resource, dba to hosapp;
+
+grant unlimited tablespace to hosapp;
+
+CREATE USER mytest 
+IDENTIFIED BY test_123
+DEFAULT TABLESPACE tbs_data
+TEMPORARY TABLESPACE temp;
+
+--privileges
+grant connect, create session, resource to mytest;
+
+
+alter user mytest quota 100M on tbs_data;
+
+alter user mytest quota 100M on tbs_index;
+ 

@@ -1,0 +1,46 @@
+--network settings 
+modify network adapter 1 to bridged adapter
+
+start vm 
+
+--start listener 
+$ lsnrctl start 
+
+--find ip of vm 
+$ ifconfig 
+
+--add /etc/hosts file 
+c:\Windows\System32\drivers\etc 
+
+--run notepad as administrator and open hosts file then add following entry 
+192.168.1.101 primary.localdomain primary 
+
+--add tnsnames on windows 
+c:\app\ora_c\virtual\product\12.2.0\dbhome_1\network\admin\tnsnames.ora 
+
+PRIMARY = 
+ ( DESCRIPTION = 
+   (ADDRESS = (PROTOCOL = TCP ) (HOST = primary.localdomain)(PORT = 1521))
+   (CONNECT_DATA = 
+    (SERVER = DEDICATED)
+	(SERVICE_NAME = orclprm )
+	(UR=A)
+ )
+)
+
+-- open command prompt 
+cmd
+
+--ping vm 
+>ping primary
+
+--tnsping vm 
+>tnsping primary
+
+--connect to database 
+>sqlplus sys/oracle@primary as sysdba
+
+SQL> startup
+
+SQL> shutdown immediate
+

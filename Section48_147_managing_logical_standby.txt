@@ -1,0 +1,242 @@
+
+--open database on both servers
+$ lsnrctl start
+
+$ sqlplus / as sysdba
+
+SQL> startup;
+
+SQL> select name, database_role, open_mode from v$database;
+
+SQL> column name format a20
+SQL> column open_mode format a20
+SQL> select name, open_mode from v$pdbs;
+
+
+--on primary
+$ sqlplus mytest/mytest@pdb1
+
+SQL> create table test_tab2 (a number);
+
+SQL> insert into test_tab2 values(1);
+
+SQL> insert into test_tab2 values(2);
+SQL> commit;
+
+--on standby 
+$ sqlplus mytest/mytest@pdb1
+
+SQL> select * from test_tab2;
+
+
+--Using DBMS_LOGSTDBY.SKIP to Prevent Changes to Specific Schema Objects
+
+--stop SQL apply
+--with sys on cdb
+SQL> alter database stop logical standby apply;
+
+--with mytest
+SQL> EXECUTE DBMS_LOGSTDBY.SKIP ('DML','MYTEST','TEST_TAB2');
+
+SQL> EXECUTE DBMS_LOGSTDBY.SKIP (stmt => 'SCHEMA_DDL', schema_name => 'MYTEST', object_name => 'TEST_TAB2');
+
+--start SQL Apply
+--with sys on cdb
+SQL> alter database start logical standby apply immediate;
+
+
+--on primary
+SQL> insert into test_tab2 values (3);
+SQL> commit;
+
+--on standby 
+SQL> select * from test_tab2;
+
+
+--stop SQL apply 
+SQL> alter database stop logical standby apply;
+
+--add pluggable database on primary to standby tnsnames file
+$ cd /u01/app/oracle/product/12.2.0.1/db_1/network/admin
+
+$ vi tnsnames.ora
+
+pr_pdb1 =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = pdb1.localdomain)
+  )
+ )
+
+$ tnsping pr_pdb1
+
+--create database link
+$ sqlplus sys/oracle@pdb1 as sysdba
+
+SQL> create public database link dblink connect to mytest identified by mytest using 'pr_pdb1';
+
+--with mytest
+SQL> column statement_opt format a10
+SQL> column owner format a10
+SQL> column name format a10
+SQL> select owner, name, statement_opt  from dba_logstdby_skip where owner='MYTEST';
+
+SQL> EXECUTE DBMS_LOGSTDBY.UNSKIP (STMT => 'DML', SCHEMA_NAME => 'MYTEST',  OBJECT_NAME => 'TEST_TAB2');
+
+SQL> EXECUTE DBMS_LOGSTDBY.UNSKIP (STMT => 'SCHEMA_DDL', SCHEMA_NAME => 'MYTEST',  OBJECT_NAME => 'TEST_TAB2');
+
+SQL> select owner, name, statement_opt  from dba_logstdby_skip where owner='MYTEST';
+
+SQL> select db_link as db_link_name from dba_db_links;
+
+SQL> select * from test_tab2;
+
+SQL> select * from test_tab2@DBLINK.LOCALDOMAIN;
+
+SQL> EXECUTE DBMS_LOGSTDBY.INSTANTIATE_TABLE(schema_name => 'MYTEST', table_name => 'TEST_TAB2', DBLINK => 'DBLINK.LOCALDOMAIN');
+
+--Start SQL apply
+SQL> alter database start logical standby apply immediate;
+
+SQL> select * from test_tab2;
+
+
+--on both servers
+SQL> alter session set nls_date_format='dd.mm.yyyy hh24:mi:ss';
+
+--on primary
+SQL> alter table test_tab2 add (b date default sysdate);
+
+SQL> select * from test_tab2;
+
+--on standby  
+SQL> select * from test_tab2;
+
+--on primary
+SQL> create table test_tab3 (a number, b date);
+
+SQL> create or replace trigger trg_test_dflt before insert or update on mytest.test_tab3
+ referencing  
+ new as new_row for each row
+ begin  
+ :new_row.b:= systimestamp;  
+ end;
+/
+
+SQL> insert into test_tab3(a) values(1);
+SQL> commit;
+
+SQL> select * from test_tab3;
+
+--on standby  
+SQL> select * from test_tab3;
+
+
+--Performing DDL on a logical standby database
+
+--Create table on logical standby database
+SQL> create table test_tab4 (a number);
+
+SQL> alter database guard standby;
+
+--Create index on logical standby database
+SQL> alter database stop logical standby apply;
+
+SQL> alter session disable guard;
+
+SQL> create index ind_test on mytest.test_tab2(a);
+
+SQL> alter session enable guard;
+
+SQL> alter database start logical standby apply immediate;
+
+
+--Manual deletion of log files
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('LOG_AUTO_DELETE', 'FALSE');
+
+--To purge the logical standby session of metadata that is no longer needed
+SQL> EXECUTE DBMS_LOGSTDBY.PURGE_SESSION;
+
+--to list the archived redo log files that can be removed
+SQL> select * from dba_logmnr_purged_log;
+
+--Automatic deletion of log files
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('LOG_AUTO_DELETE', 'TRUE');
+
+
+--Customizing a logical standby database
+
+--Customizing logging of events in the DBA_LOGSTDBY_EVENTS view
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET ('MAX_EVENTS_RECORDED', '100');
+
+--Determining if DDL statements have been applied
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET ('RECORD_APPLIED_DDL', 'TRUE');
+
+--Checking the DBA_LOGSTDBY_EVENTS view for unsupported operations
+SQL> alter database stop logical standby apply;
+
+SQL> EXEC DBMS_LOGSTDBY.APPLY_SET('RECORD_UNSUPPORTED_OPERATIONS', 'TRUE');
+
+SQL> alter database start logical standby apply immediate;
+
+
+--Tuning a Logical Standby Database
+
+--Adjust the number of processes
+
+--Check whether APPLIER processes are busy
+SQL> select count(*) as idle_applier from v$logstdby_process where type='APPLIER' and status_code = 16116;
+
+--Ensure there is enough work available
+SQL> column name format a30
+SQL> column value format a10
+SQL> select name,value from v$logstdby_stats where name = 'txns applied' or name = 'distinct txns in queue';
+
+--To adjust the number of APPLIER processes, satisfy the following equation
+APPLY_SERVERS + PREPARE_SERVERS = MAX_SERVERS - 3
+
+--First set MAX_SERVERS to 14. Then set the number of APPLY_SERVERS to 10
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('MAX_SERVERS', 14);
+
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('APPLY_SERVERS', 10);
+
+
+--Ensure all PREPARER processes are busy:
+SQL> select count(*) as idle_preparer from v$logstdby_process where type = 'PREPARER' and status_code = 16116;
+
+--Ensure the number of transactions ready to be applied is less than the number of APPLIER processes:
+SQL> select name, value from v$logstdby_stats where name = 'txns applied' or name = 'distinct txns in queue';
+
+SQL> select count(*) as applier_count from v$logstdby_process where type = 'APPLIER';
+
+--Ensure there are idle APPLIER processes:
+SQL> select count(*) as idle_applier from v$logstdby_process where type = 'APPLIER' and status_code = 16116;
+
+
+--To keep the number of APPLIER processes set to 10, and increase the number of PREPARER processes from 1 to 3
+APPLY_SERVERS + PREPARE_SERVERS = MAX_SERVERS - 3
+
+--First increase the number MAX_SERVERS from 14 to 16 then increase the number of PREPARER processes
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('MAX_SERVERS', 16);
+
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('PREPARE_SERVERS', 3);
+
+
+--Adjust how transactions are applied on the Logical Standby Database
+
+SQL> alter database stop logical standby apply;
+
+--Allow transactions to be applied out of order from how they were committed on the primary databases
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_SET('PRESERVE_COMMIT_ORDER', 'FALSE');
+
+SQL> alter database start logical standby apply immediate;
+
+
+--Change back the apply mode
+SQL> alter database stop logical standby apply;
+
+SQL> EXECUTE DBMS_LOGSTDBY.APPLY_UNSET('PRESERVE_COMMIT_ORDER');
+
+SQL> alter database start logical standby apply immediate;

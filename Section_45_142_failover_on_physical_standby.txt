@@ -1,0 +1,165 @@
+
+
+--Verify that there are no redo transport errors or redo gaps at the standby database
+--on primary
+SQL> SELECT STATUS, GAP_STATUS FROM V$ARCHIVE_DEST_STATUS WHERE DEST_ID = 2;
+
+SQL> select open_mode,database_role,switchover_status from v$database;
+
+
+--Verify that the target standby database is ready for switchover.
+SQL> ALTER DATABASE SWITCHOVER TO orclstb VERIFY;
+
+
+--check alert log
+$ cd /u01/app/oracle/diag/rdbms/orclprm/orcl/trace
+
+$ tail -200 alert_orcl.log 
+
+--to fix warning on standby
+SQL> alter system set log_archive_dest_2='service="primary", db_unique_name="orclprm", valid_for=(online_logfile,all_roles)' scope=both;
+
+
+--Initiate the switchover on the primary database
+SQL> ALTER DATABASE SWITCHOVER TO orclstb;
+
+-- on the new primary database
+$ sqlplus / as sysdba
+
+SQL> ALTER DATABASE OPEN;
+
+SQL> select open_mode,database_role from v$database;
+
+-- mount the new physical standby database
+SQL> STARTUP MOUNT;
+
+--open standby database read only
+SQL> alter database open;
+
+SQL> select open_mode,database_role from v$database;
+
+--Start Redo Apply on the new physical standby database
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DISCONNECT FROM SESSION;
+
+SQL> SELECT PROCESS, STATUS, THREAD#, SEQUENCE#, BLOCK#, BLOCKS FROM V$MANAGED_STANDBY;
+
+--on new primary
+SQL> alter system set log_archive_dest_state_2=enable;
+
+--on both servers
+$ dgmgrl / 
+
+DGMGRL> SHOW CONFIGURATION;
+
+DGMGRL> SHOW DATABASE orclprm;
+
+DGMGRL> SHOW DATABASE orclstb;
+
+
+--on new primary
+$ sqlplus mytest/mytest@pdb1
+
+SQL> insert into test_tab values(4);
+SQL> commit;
+
+--on new standby
+SQL> select name,open_mode from v$pdbs;
+
+SQL> alter pluggable database pdb1 open;
+
+$ sqlplus mytest/mytest@pdb1
+
+SQL> select * from test_tab;
+ 
+--Switch back
+--on new standby database
+$ sqlplus / as sysdba
+
+--new feature on 12c Release 2
+SQL> alter system set STANDBY_DB_PRESERVE_STATES= ALL scope=spfile;
+
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+
+SQL> shutdown immediate;
+
+SQL> startup;
+
+SQL> alter pluggable database pdb1 open;
+
+--from another terminal
+$ sqlplus mytest/mytest@pdb1
+
+SQL> select * from test_tab;
+
+
+--on new primary database
+SQL> SELECT STATUS, GAP_STATUS FROM V$ARCHIVE_DEST_STATUS WHERE DEST_ID = 2;
+
+--Verify that the target standby database is ready for switchover
+SQL> ALTER DATABASE SWITCHOVER TO orclprm VERIFY;
+
+$ cd /u01/app/oracle/diag/rdbms/orclstb/orcl/trace
+
+$ tail -100 alert_orcl.log
+
+SQL> SELECT TABLESPACE_NAME FROM DBA_TABLESPACES WHERE CONTENTS = 'TEMPORARY';
+
+--add temporary file to the new standby database
+SQL> ALTER TABLESPACE TEMP ADD TEMPFILE '/u01/app/oracle/oradata/ORCL/datafile/temp01.dbf' SIZE 40M REUSE;
+
+--Initiate the switchover on the new primary database
+SQL> ALTER DATABASE SWITCHOVER TO orclprm;
+
+-- on primary database
+SQL> ALTER DATABASE OPEN;
+
+-- mount physical standby database
+SQL> STARTUP MOUNT;
+
+--open standby database read only
+SQL> alter database open;
+
+--Start Redo Apply on physical standby database
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DISCONNECT FROM SESSION;
+
+SQL> SELECT PROCESS, STATUS, THREAD#, SEQUENCE#, BLOCK#, BLOCKS FROM V$MANAGED_STANDBY;
+
+--on both servers
+$ dgmgrl / 
+
+DGMGRL> SHOW CONFIGURATION;
+
+--control status of sessions that we have created
+--on primary server session of mytest user
+
+SQL> select * from test_tab;
+
+
+--Switchover via Data Guard Broker
+
+--on primary
+$ dgmgrl /
+
+DGMGRL> switchover to orclstb
+
+--connect to broker with sysdba role
+$ dgmgrl sys/oracle@primary
+
+DGMGRL> switchover to orclstb
+
+DGMGRL> show configuration
+
+
+--switch back
+--on new primary
+
+$ dgmgrl
+
+DGMGRL> connect sys/oracle@standby
+
+DGMGRL> switchover to orclprm
+
+DGMGRL> show configuration
+
+
+

@@ -1,0 +1,14 @@
+
+
+--1. 
+show pdbs
+
+--2. 
+alter pluggable database orclpdb open;
+
+--3. 
+show pdbs
+
+--4. 
+alter pluggable database orclpdb save state;
+

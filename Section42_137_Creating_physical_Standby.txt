@@ -1,0 +1,370 @@
+
+--Add network adapter
+--primary
+ipv4 : 192.168.56.101
+netmask : 255.255.255.0
+gateway : 0.0.0.0
+
+--standby
+ipv4 : 192.168.56.102
+netmask : 255.255.255.0
+gateway : 0.0.0.0
+
+
+--Start listener and database if they are not opened already
+$ lsnrctl start
+
+$ sqlplus / as sysdba
+
+SQL> startup;
+
+
+--Control archivelog mod
+SQL> archive log list
+
+SQL> select log_mode from v$database;
+
+--If it is noarchivelog mode, switch is to archivelog mode
+SQL> shutdown immediate;
+
+SQL> startup mount;
+
+SQL> alter database archivelog;
+
+SQL> alter database open;
+
+
+--Enable force logging and flashback on the primary
+SQL> alter database force logging;
+
+SQL> alter database flashback on;
+
+
+--Create standby redologs
+SQL> select GROUP#,THREAD#,BYTES/1024/1024 from v$log;
+
+SQL> select member from v$logfile;
+
+SQL> alter database add standby logfile '/u01/app/oracle/oradata/orcl/redostb01.log' size 209715200;
+
+SQL> alter database add standby logfile '/u01/app/oracle/oradata/orcl/redostb02.log' size 209715200;
+
+SQL> alter database add standby logfile '/u01/app/oracle/oradata/orcl/redostb03.log' size 209715200;
+
+
+--Adjust some initialization parameters:
+SQL> show parameter db_name
+
+SQL> show parameter db_unique_name
+
+SQL> alter system set db_unique_name=orclprm scope=spfile;
+
+--Remote_login_password:
+SQL> show parameter remote_login_password
+
+-- LOG_ARCHIVE_CONFIG:
+SQL> alter system set LOG_ARCHIVE_CONFIG='DG_CONFIG=(orclprm,orclstb)' scope = spfile;
+
+-- LOG_ARHIVE_DEST_1:
+SQL> alter system set LOG_ARCHIVE_DEST_1='LOCATION=USE_DB_RECOVERY_FILE_DEST VALID_FOR=(ALL_LOGFILES,ALL_ROLES) 
+DB_UNIQUE_NAME=orclprm' scope = spfile;
+
+-- Parameter for Swicth- Failover:
+SQL> alter system set FAL_SERVER='orclstb' scope = spfile;
+
+SQL> alter system set STANDBY_FILE_MANAGEMENT=AUTO scope = spfile;
+
+
+--Restart the database and check parameters
+SQL> shutdown immediate;
+
+SQL> startup;
+
+SQL> set linesize 500 pages 100
+SQL> col name format a30
+SQL> col value format a100
+SQL> select name, value
+from v$parameter
+where name in ('db_name','db_unique_name','log_archive_config',
+'log_archive_dest_1','log_archive_dest_2',
+'log_archive_dest_state_1','log_archive_dest_state_2',
+'remote_login_passwordfile', 'log_archive_format', 'log_archive_max_processes',
+'fal_server','db_file_name_convert', 'log_file_name_convert', 'standby_file_management');
+
+
+--Network configuration
+
+--Edit file listener.ora
+$ cd $ORACLE_HOME/network/admin
+
+$ vi listener.ora
+
+--add following lines
+SID_LIST_LISTENER =
+ (SID_LIST =
+  (SID_DESC =
+   (GLOBAL_DBNAME = orclprm)
+   (ORACLE_HOME = /u01/app/oracle/product/12.2.0.1/db_1)
+   (SID_NAME = orcl)
+ )
+  (SID_DESC =
+   (GLOBAL_DBNAME = orclprm_dgmgrl)
+   (ORACLE_HOME = /u01/app/oracle/product/12.2.0.1/db_1)
+   (SID_NAME = orcl)
+  )
+)
+
+--Add following lines to the file tnsnames.ora
+$ vi tnsnames.ora
+
+# Data Guard
+PRIMARY =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = orclprm)
+   (UR=A)
+  )
+ )
+
+STANDBY =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = standby.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = orclstb)
+   (UR=A)
+  )
+ )
+
+pdb1 =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = pdb1)
+  )
+ )
+
+LISTENER_ORCL =
+(ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+
+--Restart the listener
+$ lsnrctl stop 
+
+$ lsnrctl start 
+
+--modify /etc/hosts file
+$ su root
+
+$ vi /etc/hosts
+
+192.168.56.101 primary.localdomain primary
+192.168.56.102 standby.localdomain standby
+
+--exit to oracle user
+
+
+--Creating a physical standby database
+--primary server
+$ sqlplus / as sysdba
+
+SQL> create pfile='/tmp/initorcl.ora' from spfile;
+
+--Copy files orapw file and initorcl.ora to server standby
+$ scp /tmp/initorcl.ora standby:/tmp/
+
+$ scp /u01/app/oracle/product/12.2.0.1/db_1/dbs/orapworcl standby:/u01/app/oracle/product/12.2.0.1/db_1/dbs/
+
+
+--standby server
+$ mkdir -p /u01/app/oracle/admin/orcl
+
+$ mkdir -p /u01/app/oracle/admin/orcl/adump
+
+$ mkdir -p /u01/app/oracle/fast_recovery_area
+
+$ mkdir -p /u01/app/oracle/fast_recovery_area/orcl
+
+$ mkdir -p /u01/app/oracle/oradata/orcl
+
+$ mkdir -p /u01/app/oracle/oradata/orcl/pdbseed
+
+$ mkdir -p /u01/app/oracle/oradata/orcl/pdb1
+
+
+--Modify the parameter in the created /tmp/initorcl.ora file
+$ vi /tmp/initorcl.ora
+
+*.db_unique_name='ORCLSTB'
+*.fal_server='orclprm'
+*.log_archive_config='DG_CONFIG=(orclstb,orclprm)'
+*.log_archive_dest_1='LOCATION=USE_DB_RECOVERY_FILE_DEST VALID_FOR=(ALL_LOGFILES,ALL_ROLES) DB_UNIQUE_NAME=orclstb'
+
+--Create an entry in the /etc/oratab:
+orcl:/u01/app/oracle/product/12.2.0.1/db_1:N
+
+
+--Network configuration
+
+--Edit file listener.ora
+$ cd $ORACLE_HOME/network/admin
+
+--Add following lines
+$ vi listener.ora
+
+SID_LIST_LISTENER =
+ (SID_LIST =
+  (SID_DESC =
+   (GLOBAL_DBNAME = orclstb)
+   (ORACLE_HOME = /u01/app/oracle/product/12.2.0.1/db_1)
+   (SID_NAME = orcl)
+  )
+  (SID_DESC =
+   (GLOBAL_DBNAME = orclstb_dgmgrl)
+   (ORACLE_HOME = /u01/app/oracle/product/12.2.0.1/db_1)
+   (SID_NAME = orcl)
+  )
+)
+
+--Add following lines to the file tnsnames.ora
+$ vi tnsnames.ora
+
+# Data Guard
+PRIMARY =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = orclprm)
+   (UR=A)
+  )
+ )
+
+STANDBY =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = standby.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = orclstb)
+   (UR=A)
+  )
+ )
+
+pdb1 =
+ (DESCRIPTION =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = standby.localdomain)(PORT = 1521))
+  (CONNECT_DATA =
+   (SERVER = DEDICATED)
+   (SERVICE_NAME = pdb1)
+  )
+ )
+
+LISTENER_ORCL =
+(ADDRESS = (PROTOCOL = TCP)(HOST = primary.localdomain)(PORT = 1521))
+
+--Restart the listener:
+$ lsnrctl stop
+
+$ lsnrctl start
+
+--modify /etc/hosts file
+$ su root
+
+$ vi /etc/hosts
+
+192.168.56.101 primary.localdomain primary
+192.168.56.102 standby.localdomain standby
+
+--exit to oracle user
+
+
+--Start standby database and create the spfile:
+
+--Set environment:
+$ . oraenv
+ORACLE_SID = [orcl] ? orcl
+
+$ sqlplus / as sysdba
+
+SQL> startup nomount pfile='/tmp/initorcl.ora';
+
+SQL> create spfile from pfile='/tmp/initorcl.ora';
+
+SQL> shutdown immediate;
+
+SQL> startup nomount;
+
+--Start duplication
+$ rman target sys/oracle@primary auxiliary sys/oracle@standby
+
+RMAN> DUPLICATE TARGET DATABASE
+FOR STANDBY
+FROM ACTIVE DATABASE
+NOFILENAMECHECK;
+
+--Check the database role on the standby
+$ sqlplus / as sysdba
+
+SQL> select database_role from v$database;
+
+
+--Check database parameters on the physical standby
+SQL> set linesize 500 pages 100
+
+SQL> col name for a30
+
+SQL> col value forma a100
+
+SQL> select name, value from v$parameter
+where name in ('db_name','db_unique_name','log_archive_config',
+'log_archive_dest_1','log_archive_dest_2',
+'log_archive_dest_state_1','log_archive_dest_state_2',
+'remote_login_passwordfile', 'log_archive_format', 'log_archive_max_processes',
+'fal_server','db_file_name_convert', 'log_file_name_convert', 'standby_file_management');
+
+
+--Create standby logfiles:
+SQL> ALTER DATABASE ADD STANDBY LOGFILE '/u01/app/oracle/oradata/orcl/redostb01.log' size 209715200;
+
+SQL> ALTER DATABASE ADD STANDBY LOGFILE '/u01/app/oracle/oradata/orcl/redostb02.log' size 209715200;
+
+SQL> ALTER DATABASE ADD STANDBY LOGFILE '/u01/app/oracle/oradata/orcl/redostb03.log' size 209715200;
+
+
+-- on both servers
+$ sqlplus / as sysdba
+
+SQL> alter system set dg_broker_start=true scope=both;
+
+--Creating a Data Guard configuration via a tool DGMGRL on primary server
+$ dgmgrl /
+
+DGMGRL> create configuration orcl as primary database is orclprm connect identifier is primary;
+
+DGMGRL> add database orclstb as connect identifier is standby maintained as physical;
+
+DGMGRL> enable configuration;
+
+
+--Set the property StaticConnectIdentifier to prevent errors during switchover
+DGMGRL> edit database orclprm set property StaticConnectIdentifier="primary.localdomain:1521/orclprm_dgmgrl";
+
+DGMGRL> edit database orclstb set property StaticConnectIdentifier="standby.localdomain:1521/orclstb_dgmgrl";
+
+
+--Check the Data Guard configuration (on both servers)
+DGMGRL> show configuration
+
+DGMGRL> show database orclprm
+
+DGMGRL> show database orclstb
+
+
+--Check Data Guard in SQLPlus (on both servers)
+SQL> SELECT DATABASE_ROLE, DB_UNIQUE_NAME INSTANCE, OPEN_MODE, PROTECTION_MODE, PROTECTION_LEVEL, SWITCHOVER_STATUS 
+FROM V$DATABASE;
+
+
+

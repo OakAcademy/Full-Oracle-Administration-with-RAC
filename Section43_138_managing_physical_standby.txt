@@ -1,0 +1,248 @@
+
+--on both servers
+--start listener
+$ lsnrctl status
+
+$ lsnrctl start
+
+--start database 
+$ sqlplus / as sysdba
+
+SQL> startup;
+
+SQL> select name,open_mode from v$pdbs;
+
+SQL> alter pluggable database pdb1 open;
+
+SQL> alter pluggable database pdb1 save state;
+
+SQL> shutdown immediate;
+
+SQL> startup;
+
+--on standby
+--control if database is open in read-only mode:
+SQL> SELECT open_mode FROM V$DATABASE;
+
+--Check the configuration and status of the databases from the broker
+--on any server
+$ dgmgrl / 
+
+DGMGRL> SHOW CONFIGURATION;
+
+DGMGRL> SHOW DATABASE orclprm;
+
+DGMGRL> SHOW DATABASE orclstb;
+
+--connect to pluggable database by sqlplus command
+$ sqlplus sys/oracle@pdb1 as sysdba
+--or alter session command
+SQL> alter session set container=pdb1;
+
+SQL> show con_name
+
+--on standby
+SQL> SELECT PROCESS, STATUS, THREAD#, SEQUENCE#, BLOCK#, BLOCKS FROM V$MANAGED_STANDBY;
+
+--create a test user on primary
+SQL> create user mytest identified by mytest;
+
+SQL> grant dba to mytest;
+
+SQL> conn mytest/mytest@pdb1
+
+SQL> show con_name
+
+SQL> show user
+
+SQL> create table test_tab (a number);
+
+SQL> insert into test_tab values(1);
+SQL> commit;
+
+--on standby
+$ sqlplus mytest/mytest@pdb1
+
+SQL> select * from test_tab;
+
+--stopping redo apply
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+
+SQL> SELECT PROCESS, STATUS, THREAD#, SEQUENCE#, BLOCK#, BLOCKS FROM V$MANAGED_STANDBY;
+
+--on primary 
+SQL> insert into test_tab values(2);
+SQL> commit;
+
+--on standby
+--starting redo apply
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DISCONNECT FROM SESSION;
+
+--starting redo apply with DELAY option(delay 60 minutes)
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE DELAY 60 DISCONNECT FROM SESSION;
+
+SQL> select * from test_tab;
+
+--control real time query from data guard broker
+$ dgmgrl / 
+
+DGMGRL> SHOW DATABASE orclstb;
+
+--stopping redo apply
+$ sqlplus / as sysdba
+
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+
+--on primary 
+SQL> insert into test_tab values(3);
+SQL> commit;
+
+--on standby
+--starting redo apply from current log file
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE USING CURRENT LOGFILE DISCONNECT;
+
+SQL> SELECT open_mode FROM V$DATABASE;
+
+--control real time query from data guard broker
+$ dgmgrl / 
+
+DGMGRL> SHOW DATABASE orclstb;
+
+
+$ sqlplus mytest/mytest@pdb1
+
+SQL> select * from test_tab;
+
+
+--Monitoring Apply Lag in a Real-time Query Environment
+
+SQL> SELECT name, value, datum_time, time_computed FROM V$DATAGUARD_STATS WHERE name like 'apply lag';
+     
+
+--To obtain a histogram that shows the history of apply lag values since the standby instance was last started
+SQL> SELECT * FROM V$STANDBY_EVENT_HISTOGRAM WHERE NAME = 'apply lag' AND COUNT > 0;
+
+
+--Configuring Apply Lag Tolerance in a Real-time Query Environment
+SQL> ALTER SESSION SET STANDBY_MAX_DATA_DELAY=2;
+
+
+--Forcing Redo Apply Synchronization in a Real-time Query Environment
+SQL> ALTER SESSION SYNC WITH PRIMARY;
+
+
+--Adding Temp Files to a Physical Standby
+
+--Identify the tablespaces that contain temporary files on the standby database
+SQL> SELECT TABLESPACE_NAME FROM DBA_TABLESPACES WHERE CONTENTS = 'TEMPORARY';
+ 
+--add a new temporary file to the standby database
+SQL> ALTER TABLESPACE TEMP ADD TEMPFILE '/u01/app/oracle/oradata/ORCLSTB/datafile/temp01.dbf' SIZE 40M REUSE;
+
+
+--DML Operations on Temporary Tables on Oracle Active Data Guard Instances
+
+--Using Sequences in Oracle Active Data Guard
+--On the primary database
+SQL> CREATE GLOBAL TEMPORARY TABLE gtt (a int);
+ 
+SQL> CREATE SEQUENCE g CACHE 10;
+
+--On the standby database
+SQL> INSERT INTO gtt VALUES (g.NEXTVAL);
+ 
+SQL> INSERT INTO gtt VALUES (g.NEXTVAL);
+
+SQL> SELECT * FROM gtt;
+
+
+--On the primary database
+SQL> SELECT g.NEXTVAL FROM dual;
+
+--Note: Sequences created with the ORDER or NOCACHE options cannot be accessed on an Oracle Active Data Guard standby.
+
+
+--Session Sequences
+--Using Session Sequences
+
+--On the primary database
+SQL> CREATE GLOBAL TEMPORARY TABLE gtt2 (a int);
+ 
+SQL> CREATE SEQUENCE s SESSION;
+
+--On the standby database
+SQL> INSERT INTO gtt2 VALUES (s.NEXTVAL);
+
+SQL> INSERT INTO gtt2 VALUES (s.NEXTVAL);
+ 
+SQL> SELECT * FROM gtt2;
+
+
+--From another session of the same standby database
+SQL> INSERT INTO gtt2 VALUES (s.NEXTVAL);
+ 
+SQL> INSERT INTO gtt2 VALUES (s.NEXTVAL);
+ 
+SQL> SELECT * FROM gtt2;
+
+
+--Adding a Data File or Creating a Tablespace
+
+--if STANDBY_FILE_MANAGEMENT is set to auto, datafile and tablespace will be created automaticly
+SQL> show parameter standby_file_management
+
+--on primary
+--create tablespace
+SQL> CREATE TABLESPACE tbs_data
+   DATAFILE '/u01/app/oracle/oradata/ORCL/datafile/tbs_data_01.dbf' SIZE 10M
+   AUTOEXTEND ON NEXT 1M MAXSIZE 100M;
+
+--add datafile
+SQL> alter tablespace tbs_data add datafile '/u01/app/oracle/oradata/ORCL/datafile/tbs_data_02.dbf' SIZE 10M
+   AUTOEXTEND ON NEXT 1M MAXSIZE 100M;
+
+--on standby
+SQL> select t.name as tablespace,d.name as datafile from v$tablespace t, v$datafile d 
+where t.ts# = d.ts# and t.name = 'TBS_DATA';
+
+
+--Renaming a Data File in the Primary Database
+
+SQL> ALTER TABLESPACE tbs_data OFFLINE;
+
+$ mv /u01/app/oracle/oradata/ORCL/datafile/tbs_data_02.dbf /u01/app/oracle/oradata/ORCL/datafile/tbs_data_new.dbf
+
+SQL> ALTER TABLESPACE tbs_data RENAME DATAFILE '/u01/app/oracle/oradata/ORCL/datafile/tbs_data_02.dbf' 
+TO '/u01/app/oracle/oradata/ORCL/datafile/tbs_data_new.dbf';
+
+SQL> ALTER TABLESPACE tbs_data ONLINE;
+
+
+--Drop tablespace
+--on primary
+SQL> DROP TABLESPACE tbs_data INCLUDING CONTENTS AND DATAFILES;
+
+--on standby
+SQL> select t.name as tablespace,d.name as datafile from v$tablespace t, v$datafile d 
+where t.ts# = d.ts# and t.name = 'TBS_DATA';
+
+
+--Shutting Down a Physical Standby Database
+
+--on standby
+SQL> ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+
+SQL> shutdown immediate;
+
+--If the primary database is up and running, defer the standby destination on the primary database 
+--and perform a log switch before shutting down the physical standby database.
+
+SQL> alter system set log_archive_dest_state_2=defer;
+
+SQL> shutdown immediate;
+
+
+
+
+
+

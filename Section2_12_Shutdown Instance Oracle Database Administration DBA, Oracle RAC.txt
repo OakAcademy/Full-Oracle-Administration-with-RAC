@@ -1,0 +1,11 @@
+--1.
+show pdbs
+
+--2.
+alter pluggable database orclpdb close;
+
+--3. 
+shutdown immediate
+
+--4.
+startup

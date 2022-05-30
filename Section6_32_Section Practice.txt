@@ -1,0 +1,45 @@
+/*
+if you can't connect to pdb please check open_mode of pdb by running this on cdb:
+select name,open_mode from v$containers;
+
+if open_mode of ORCLPDB is not READ_WRITE then run this command on cdb:
+alter pluggable database orclpdb open;
+
+*/
+
+--connect to database with mytest
+
+insert into doctors (doctorid,name,position,department)
+values (7,'Ben Stock','Attending Physician',1);
+
+--connect to database with hosapp
+
+drop public synonym doctors;
+
+--connect to database with mytest
+
+select * from doctors;
+
+--try to update inspections table with mytest
+
+update inspections set doctorid = 3 where inspectionid = 103;
+
+--try to select test_tab1 with both users. we create synonym with hosapp.
+
+select * from test_tab1;
+
+--try to insert data above column limit
+
+select  * from test_tab2;
+
+insert into test_tab2 values (123,'asdf','qwerty');
+
+alter table test_tab2 modify name varchar2(30);
+
+alter table test_tab2 modify surname varchar2(30);
+
+--try to select test_tab3 with hosapp. synonym name is test_tab4.
+
+select * from test_tab3;
+
+select * from test_tab4;
